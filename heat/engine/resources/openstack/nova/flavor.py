@@ -39,7 +39,7 @@ class NovaFlavor(resource.Resource):
 
     support_status = support.SupportStatus(version='2014.2')
 
-    default_client_name = 'nova'
+    default_client_name = 'openstack'
 
     entity = 'flavors'
 
@@ -160,69 +160,80 @@ class NovaFlavor(resource.Resource):
             args['name'] = self.physical_resource_name()
         flavor_keys = args.pop(self.EXTRA_SPECS)
         tenants = args.pop(self.TENANTS)
-        flavor = self.client().flavors.create(**args)
+        flavor = self.client().compute.create_flavor(**args)
         self.resource_id_set(flavor.id)
         if flavor_keys:
-            flavor.set_keys(flavor_keys)
+            self.client().compute.create_flavor_extra_specs(flavor, flavor_keys)
 
         if not self.properties[self.IS_PUBLIC]:
             if not tenants:
                 LOG.info('Tenant property is recommended '
                          'for the private flavors.')
                 tenant = self.stack.context.project_id
-                self.client().flavor_access.add_tenant_access(flavor, tenant)
+                self.client().compute.add_flavor_access(flavor.id, tenant)
             else:
                 for tenant in tenants:
                     # grant access only to the active project(private flavor)
-                    self.client().flavor_access.add_tenant_access(flavor,
-                                                                  tenant)
+                    self.client().compute.add_flavor_access(flavor.id, tenant)
 
     def handle_update(self, json_snippet, tmpl_diff, prop_diff):
         """Update nova flavor."""
         if self.EXTRA_SPECS in prop_diff:
-            flavor = self.client().flavors.get(self.resource_id)
-            old_keys = flavor.get_keys()
-            flavor.unset_keys(old_keys)
+            flavor = self.client().compute.get_flavor(self.resource_id)
+            old_keys = self.client().compute.get_flavor_extra_specs(flavor)
+            for key in old_keys:
+                self.client().compute.delete_flavor_extra_specs_property(
+                    flavor.id, key)
             new_keys = prop_diff.get(self.EXTRA_SPECS)
             if new_keys is not None:
-                flavor.set_keys(new_keys)
+                self.client().compute.create_flavor_extra_specs(
+                    flavor, new_keys)
         """Update tenant access list."""
         if self.TENANTS in prop_diff and not self.properties[self.IS_PUBLIC]:
-            kwargs = {'flavor': self.resource_id}
             old_tenants = [
-                x.tenant_id for x in self.client().flavor_access.list(**kwargs)
+                x.tenant_id for x in
+                self.client().compute.flavor_accesses(self.resource_id)
             ] or []
             new_tenants = prop_diff.get(self.TENANTS) or []
             tenants_to_remove = list(set(old_tenants) - set(new_tenants))
             tenants_to_add = list(set(new_tenants) - set(old_tenants))
             if tenants_to_remove or tenants_to_add:
-                flavor = self.client().flavors.get(self.resource_id)
                 for _tenant in tenants_to_remove:
-                    self.client().flavor_access.remove_tenant_access(flavor,
-                                                                     _tenant)
+                    self.client().compute.remove_flavor_access(
+                        self.resource_id, _tenant)
                 for _tenant in tenants_to_add:
-                    self.client().flavor_access.add_tenant_access(flavor,
-                                                                  _tenant)
+                    self.client().compute.add_flavor_access(
+                        self.resource_id, _tenant)
 
     def _resolve_attribute(self, name):
         if self.resource_id is None:
             return
-        flavor = self.client().flavors.get(self.resource_id)
+        flavor = self.client().compute.get_flavor(self.resource_id)
         if name == self.IS_PUBLIC_ATTR:
             return getattr(flavor, name)
         if name == self.EXTRA_SPECS_ATTR:
-            return flavor.get_keys()
+            return self.client().compute.get_flavor_extra_specs(flavor)
 
     def get_live_resource_data(self):
         try:
-            flavor = self.client().flavors.get(self.resource_id)
-            resource_data = {self.EXTRA_SPECS: flavor.get_keys()}
+            flavor = self.client().compute.get_flavor(self.resource_id)
+            resource_data = {self.EXTRA_SPECS:
+                           self.client().compute.get_flavor_extra_specs(flavor)}
         except Exception as ex:
             if self.client_plugin().is_not_found(ex):
                 raise exception.EntityNotFound(entity='Resource',
                                                name=self.name)
             raise
         return resource_data
+
+    def handle_check(self):
+        self.client().compute.get_flavor(self.resource_id)
+
+    def handle_delete(self):
+        if self.resource_id is None:
+            return
+        with self.client_plugin().ignore_not_found:
+            self.client().compute.delete_flavor(self.resource_id)
 
     def parse_live_resource_data(self, resource_properties, resource_data):
         return resource_data

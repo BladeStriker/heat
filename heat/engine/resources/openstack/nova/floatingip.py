@@ -169,7 +169,7 @@ class NovaFloatingIpAssociation(resource.Resource):
         ),
     }
 
-    default_client_name = 'nova'
+    default_client_name = 'openstack'
 
     def get_reference_id(self):
         return self.physical_resource_name_or_FnGetRefId()

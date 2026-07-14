@@ -760,7 +760,7 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
         ),
     }
 
-    default_client_name = 'nova'
+    default_client_name = 'openstack'
 
     def translation_rules(self, props):
         neutron_client_plugin = self.client_plugin('neutron')
@@ -775,7 +775,7 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
                 props,
                 translation.TranslationRule.RESOLVE,
                 translation_path=[self.FLAVOR],
-                client_plugin=self.client_plugin('nova'),
+                client_plugin=self.client_plugin(),
                 finder='find_flavor_by_name_or_id'),
             translation.TranslationRule(
                 props,
@@ -891,24 +891,25 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
 
         server = None
         try:
-            server = self.client().servers.create(
+            # SDK MIGRATION: Using compute.create_server instead of servers.create
+            server = self.client().compute.create_server(
                 name=self._server_name(),
-                image=image,
-                flavor=flavor,
+                image_id=image,
+                flavor_id=flavor,
                 key_name=key_name,
                 security_groups=security_groups,
-                userdata=userdata,
-                meta=instance_meta,
+                user_data=userdata,
+                metadata=instance_meta,
                 scheduler_hints=scheduler_hints,
-                nics=nics,
+                networks=nics,
                 availability_zone=availability_zone,
                 block_device_mapping=block_device_mapping,
                 block_device_mapping_v2=block_device_mapping_v2,
                 reservation_id=reservation_id,
                 config_drive=self._config_drive(),
                 disk_config=disk_config,
-                files=personality_files,
-                admin_pass=admin_pass)
+                personality=personality_files,
+                admin_password=admin_pass)
         finally:
             # Avoid a race condition where the thread could be canceled
             # before the ID is stored
@@ -927,18 +928,20 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
         return check
 
     def _update_server_tags(self, tags):
-        server = self.client().servers.get(self.resource_id)
-        self.client().servers.set_tags(server, tags)
+        # SDK MIGRATION: Using compute.set_server_tags instead of servers.set_tags
+        self.client().compute.set_server_tags(self.resource_id, tags)
 
     def handle_check(self):
-        server = self.client().servers.get(self.resource_id)
+        # SDK MIGRATION: Using compute.get_server instead of servers.get
+        server = self.client().compute.get_server(self.resource_id)
         status = self.client_plugin().get_status(server)
         checks = [{'attr': 'status', 'expected': 'ACTIVE', 'current': status}]
         self._verify_check_conditions(checks)
 
     def get_live_resource_data(self):
         try:
-            server = self.client().servers.get(self.resource_id)
+            # SDK MIGRATION: Using compute.get_server instead of servers.get
+            server = self.client().compute.get_server(self.resource_id)
             server_data = server.to_dict()
             active = self.client_plugin()._check_active(server)
             if not active:
@@ -953,8 +956,8 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
             raise
 
         if self.client_plugin().is_version_supported(MICROVERSION_TAGS):
-            tag_server = self.client().servers.get(self.resource_id)
-            server_data['tags'] = tag_server.tag_list()
+            # SDK MIGRATION: Using compute.get_server_tags instead of server.tag_list()
+            server_data['tags'] = self.client().compute.get_server_tags(self.resource_id).tags
         return server, server_data
 
     def parse_live_resource_data(self, resource_properties, resource_data):
@@ -1241,7 +1244,8 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
         if name == self.NAME_ATTR:
             return self._server_name()
         try:
-            server = self.client().servers.get(self.resource_id)
+            # SDK MIGRATION: Using compute.get_server instead of servers.get
+            server = self.client().compute.get_server(self.resource_id)
         except Exception as e:
             self.client_plugin().ignore_not_found(e)
             return ''
@@ -1256,10 +1260,11 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
         if name == self.ACCESSIPV6:
             return server.accessIPv6
         if name == self.CONSOLE_URLS:
-            return self.client_plugin('nova').get_console_urls(server)
+            return self.client_plugin().get_console_urls(server)
         if name == self.TAGS_ATTR:
             if self.client_plugin().is_version_supported(MICROVERSION_TAGS):
-                return self.client().servers.tag_list(server)
+                # SDK MIGRATION: Using compute.get_server_tags instead of servers.tag_list
+                return self.client().compute.get_server_tags(server.id).tags
             return None
 
     def add_dependencies(self, deps):
@@ -1355,8 +1360,10 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
         security_groups = after_props[self.SECURITY_GROUPS]
 
         if not server:
-            server = self.client().servers.get(self.resource_id)
-        interfaces = server.interface_list()
+            # SDK MIGRATION: Using compute.get_server instead of servers.get
+            server = self.client().compute.get_server(self.resource_id)
+        # SDK MIGRATION: Using compute.server_interfaces instead of server.interface_list()
+        interfaces = list(self.client().compute.server_interfaces(server))
         remove_ports, add_nets = self.calculate_networks(
             old_networks, new_networks, interfaces, security_groups)
 
@@ -1406,7 +1413,8 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
             return True
 
         with self.client_plugin().ignore_not_found:
-            server = self.client().servers.get(self.resource_id)
+            # SDK MIGRATION: Using compute.get_server instead of servers.get
+            server = self.client().compute.get_server(self.resource_id)
             return server.status in ('ERROR', 'DELETED', 'SOFT_DELETED')
 
         return True
@@ -1716,7 +1724,8 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
             return
 
         try:
-            self.client().servers.delete(self.resource_id)
+            # SDK MIGRATION: Using compute.delete_server instead of servers.delete
+            self.client().compute.delete_server(self.resource_id)
         except Exception as e:
             self.client_plugin().ignore_not_found(e)
             return
@@ -1725,7 +1734,8 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
     def handle_snapshot_delete(self, state):
 
         if state[1] != self.FAILED and self.resource_id:
-            image_id = self.client().servers.create_image(
+            # SDK MIGRATION: Using compute.create_server_image instead of servers.create_image
+            image_id = self.client().compute.create_server_image(
                 self.resource_id, self.physical_resource_name())
             return progress.ServerDeleteProgress(
                 self.resource_id, image_id, False)
@@ -1764,7 +1774,8 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
                                   self.name)
 
         try:
-            server = self.client().servers.get(self.resource_id)
+            # SDK MIGRATION: Using compute.get_server instead of servers.get
+            server = self.client().compute.get_server(self.resource_id)
         except Exception as e:
             if self.client_plugin().is_not_found(e):
                 raise exception.NotFound(_('Failed to find server %s') %
@@ -1776,7 +1787,8 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
             # no need to suspend again
             if self.client_plugin().get_status(server) != 'SUSPENDED':
                 LOG.debug('suspending server %s', self.resource_id)
-                server.suspend()
+                # SDK MIGRATION: Using compute.suspend_server instead of server.suspend()
+                self.client().compute.suspend_server(server)
             return server.id
 
     def check_suspend_complete(self, server_id):
@@ -1807,7 +1819,8 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
                                   self.name)
 
         try:
-            server = self.client().servers.get(self.resource_id)
+            # SDK MIGRATION: Using compute.get_server instead of servers.get
+            server = self.client().compute.get_server(self.resource_id)
         except Exception as e:
             if self.client_plugin().is_not_found(e):
                 raise exception.NotFound(_('Failed to find server %s') %
@@ -1819,14 +1832,16 @@ class Server(server_base.BaseServer, sh.SchedulerHintsMixin,
             # no need to resume again
             if self.client_plugin().get_status(server) != 'ACTIVE':
                 LOG.debug('resuming server %s', self.resource_id)
-                server.resume()
+                # SDK MIGRATION: Using compute.resume_server instead of server.resume()
+                self.client().compute.resume_server(server)
             return server.id
 
     def check_resume_complete(self, server_id):
         return self.client_plugin()._check_active(server_id)
 
     def handle_snapshot(self):
-        image_id = self.client().servers.create_image(
+        # SDK MIGRATION: Using compute.create_server_image instead of servers.create_image
+        image_id = self.client().compute.create_server_image(
             self.resource_id, self.physical_resource_name())
         self.data_set('snapshot_image_id', image_id)
         return image_id

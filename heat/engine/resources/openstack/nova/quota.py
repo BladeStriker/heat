@@ -49,7 +49,7 @@ class NovaQuota(resource.Resource):
 
     support_status = support.SupportStatus(version='8.0.0')
 
-    default_client_name = 'nova'
+    default_client_name = 'openstack'
 
     entity = 'quotas'
 
@@ -251,10 +251,15 @@ class NovaQuota(resource.Resource):
 
         kwargs = dict((k, v) for k, v in props.items()
                       if k != self.PROJECT and v is not None)
-        self.client().quotas.update(props.get(self.PROJECT), **kwargs)
+        self.client().compute.update_quota_set(
+            kwargs, project=props.get(self.PROJECT))
 
     def handle_delete(self):
-        self.client().quotas.delete(self.properties[self.PROJECT])
+        if self.resource_id is None:
+            return
+        with self.client_plugin().ignore_not_found:
+            self.client().compute.delete_quota_set(
+                self.properties[self.PROJECT])
 
     def validate(self):
         super(NovaQuota, self).validate()

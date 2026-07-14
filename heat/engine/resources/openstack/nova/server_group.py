@@ -30,7 +30,7 @@ class ServerGroup(resource.Resource):
 
     support_status = support.SupportStatus(version='2014.2')
 
-    default_client_name = 'nova'
+    default_client_name = 'openstack'
 
     entity = 'server_groups'
 
@@ -96,14 +96,14 @@ class ServerGroup(resource.Resource):
         name = self.physical_resource_name()
         policies = self.properties[self.POLICIES]
         rules = self.properties[self.RULES]
-        rules_supported = self.client_plugin().is_version_supported(
-            MICROVERSION_RULE)
-        if rules_supported:
-            server_group = self.client().server_groups.create(
-                name=name, policy=policies[0], rules=rules)
-        else:
-            server_group = self.client().server_groups.create(
-                name=name, policies=policies)
+
+        # SDK automatically converts policies↔policy based on microversion
+        # Pass policies as list - SDK handles conversion for API >= 2.64
+        create_kwargs = {'name': name, 'policies': policies}
+        if rules:
+            create_kwargs['rules'] = rules
+
+        server_group = self.client().compute.create_server_group(**create_kwargs)
         self.resource_id_set(server_group.id)
 
     def needs_replace_failed(self):
