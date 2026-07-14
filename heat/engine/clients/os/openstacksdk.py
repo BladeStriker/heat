@@ -11,22 +11,65 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import collections.abc
+import email
+from email.mime import multipart
+from email.mime import text
+import os
+import pkgutil
+import string
+from urllib import parse as urlparse
+
 from openstack.config import cloud_region
 from openstack import connection
 from openstack import exceptions
 import os_service_types
 
+from oslo_config import cfg
+from oslo_log import log as logging
+from oslo_serialization import jsonutils
+import tenacity
+
 from heat.common import config
+from heat.common import exception
+from heat.common.i18n import _
 from heat.engine.clients import client_plugin
+from heat.engine.clients import microversion_mixin
 from heat.engine.clients import os as os_client
 from heat.engine import constraints
 import heat.version
+
+LOG = logging.getLogger(__name__)
 
 CLIENT_NAME = 'openstack'
 
 
 class OpenStackSDKPlugin(os_client.ExtensionMixin,
                          client_plugin.ClientPlugin):
+    """Generic OpenStack SDK client plugin base class.
+
+    Provides common SDK functionality for service-specific client plugins.
+
+    Architecture:
+        This class provides GENERIC SDK features:
+        - Connection management
+        - Network operations
+        - Error handling (is_not_found, ignore_not_found)
+
+        Service-specific plugins inherit from this class:
+        - NovaSdkClientPlugin (heat.engine.clients.os.nova_sdk.nova)
+          * Provides ALL Nova-specific operations including microversion support
+          * Registered as 'nova' in setup.cfg
+          * Used by resources with default_client_name = 'nova'
+
+    Supported Services:
+        - Network (neutron) - Direct use via 'openstack' client
+        - Compute (nova) - Via NovaSdkClientPlugin ('nova' client)
+
+    Note: Service-specific features like microversion support should be
+    implemented in the respective service plugin (e.g., NovaSdkClientPlugin),
+    not in this generic base class.
+    """
 
     exceptions_module = exceptions
 
@@ -67,7 +110,14 @@ class OpenStackSDKPlugin(os_client.ExtensionMixin,
         return interfaces
 
     def is_not_found(self, ex):
-        return isinstance(ex, exceptions.NotFoundException)
+        """Check if exception is a NotFound error.
+
+        ADAPTED FOR: SDK - handles both NotFoundException and ResourceNotFound
+        """
+        return isinstance(ex, (exceptions.NotFoundException,
+                              exceptions.ResourceNotFound))
+
+    # ============= Network Methods =============
 
     def find_network_segment(self, value):
         return self.client().network.find_segment(value).id
@@ -84,6 +134,9 @@ class OpenStackSDKPlugin(os_client.ExtensionMixin,
     def _list_extensions(self):
         extensions = self.client().network.extensions()
         return set(extension.alias for extension in extensions)
+
+
+# ============= Network Constraints =============
 
 
 class SegmentConstraint(constraints.BaseCustomConstraint):

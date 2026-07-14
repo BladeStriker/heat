@@ -140,7 +140,7 @@ class KeyPair(resource.Resource):
             if self.properties[self.PUBLIC_KEY]:
                 self._public_key = self.properties[self.PUBLIC_KEY]
             elif self.resource_id:
-                nova_key = self.client_plugin().get_keypair(self.resource_id)
+                nova_key = self.client().compute.get_keypair(self.resource_id)
                 self._public_key = nova_key.public_key
         return self._public_key
 
@@ -185,7 +185,7 @@ class KeyPair(resource.Resource):
         if user_id:
             create_kwargs['user_id'] = user_id
 
-        new_keypair = self.client().keypairs.create(**create_kwargs)
+        new_keypair = self.client().compute.create_keypair(**create_kwargs)
 
         if (self.properties[self.SAVE_PRIVATE_KEY] and
                 hasattr(new_keypair, 'private_key')):
@@ -195,7 +195,7 @@ class KeyPair(resource.Resource):
         self.resource_id_set(new_keypair.id)
 
     def handle_check(self):
-        self.client().keypairs.get(self.resource_id)
+        self.client().compute.get_keypair(self.resource_id)
 
     def _resolve_attribute(self, key):
         attr_fn = {self.PRIVATE_KEY_ATTR: self.private_key,
@@ -210,7 +210,7 @@ class KeyPair(resource.Resource):
             return
 
         with self.client_plugin().ignore_not_found:
-            self.client().keypairs.delete(self.resource_id)
+            self.client().compute.delete_keypair(self.resource_id)
 
 
 def resource_mapping():

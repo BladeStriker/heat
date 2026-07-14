@@ -251,10 +251,16 @@ class NovaQuota(resource.Resource):
 
         kwargs = dict((k, v) for k, v in props.items()
                       if k != self.PROJECT and v is not None)
-        self.client().quotas.update(props.get(self.PROJECT), **kwargs)
+        # SDK: update_quota_set(project, **attrs) - project is first positional param
+        self.client().compute.update_quota_set(
+            props.get(self.PROJECT), **kwargs)
 
     def handle_delete(self):
-        self.client().quotas.delete(self.properties[self.PROJECT])
+        if self.resource_id is None:
+            return
+        with self.client_plugin().ignore_not_found:
+            self.client().compute.delete_quota_set(
+                self.properties[self.PROJECT])
 
     def validate(self):
         super(NovaQuota, self).validate()

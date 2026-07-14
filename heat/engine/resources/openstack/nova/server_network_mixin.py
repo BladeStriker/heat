@@ -236,8 +236,9 @@ class ServerNetworkMixin(object):
         creating. We need to store information about that ports, so store
         their IDs to data with key `external_ports`.
         """
-        server = self.client().servers.get(self.resource_id)
-        ifaces = server.interface_list()
+        # SDK: Use compute.server_interfaces() to list server interfaces
+        # Returns a generator of ServerInterface objects
+        ifaces = list(self.client().compute.server_interfaces(self.resource_id))
         external_port_ids = set(iface.port_id for iface in ifaces)
         # need to make sure external_ports data doesn't store ids of non-exist
         # ports. Delete such port_id if it's needed.
@@ -680,7 +681,8 @@ class ServerNetworkMixin(object):
         # the check for the failed status with just a check
         # to see if the resource has failed.
         with self.client_plugin().ignore_not_found:
-            server = self.client().servers.get(self.resource_id)
+            # SDK MIGRATION: Using compute.get_server instead of servers.get
+            server = self.client().compute.get_server(self.resource_id)
         if server and server.status != 'ERROR':
             self.detach_ports(self)
         else:
